@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>地図の距離測定・比較ツール</title>
+    <style>
+        /* =========================================
+           基本リセットとレイアウト
+        ========================================= */
+        * { box-sizing: border-box; }
+        body { 
+            font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif; 
+            margin: 0; 
+            padding: 0;
+            display: flex; 
+            height: 100vh; 
+            width: 100vw;
+            overflow: hidden; 
+            background-color: #e9ecef;
+            color: #333;
+        }
+        
+        /* =========================================
+           左側：地図・ズームエリア
+        ========================================= */
+        #left-area {
+            flex: 1 1 auto;
+            min-width: 0; 
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            background-color: #dcdedd;
+        }
+
+        #zoom-controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(4px);
+            padding: 8px 12px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .zoom-btn {
+            width: 32px; height: 32px;
+            font-size: 1.1em; font-weight: bold; color: #495057;
+            background: #fff; border: 1px solid #ced4da; border-radius: 6px;
+            cursor: pointer; display: flex; align-items: center; justify-content: center;
+            transition: all 0.2s;
+        }
+        .zoom-btn:hover { background: #e9ecef; border-color: #adb5bd; }
+        #zoom-display { font-weight: 600; font-size: 0.95em; width: 45px; text-align: center; color: #212529; }
+        #btn-zoom-reset { font-size: 0.85em; width: auto; padding: 0 12px; white-space: nowrap; }
+
+        #canvas-wrapper { flex: 1 1 auto; overflow: auto; padding: 30px; }
+        #canvas-container { 
+            display: inline-block; 
+            background: #fff;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            border-radius: 4px;
+        }
+        canvas { cursor: crosshair; display: block; border-radius: 4px; }
+
+        /* =========================================
+           右側：操作パネル
+        ========================================= */
+        #side-panel { 
+            flex: 0 0 420px; 
+            width: 420px;
+            background: #ffffff; 
+            box-shadow: -4px 0 15px rgba(0,0,0,0.05); 
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+        }
+        #side-panel-content { 
+            flex: 1 1 auto; 
+            padding: 20px; 
+            display: flex; 
+            flex-direction: column;
+            min-height: 0; 
+        }
+
+        h2 { font-size: 1.2rem; font-weight: 700; margin: 0 0 15px 0; color: #212529; display: flex; align-items: center; gap: 8px;}
+        input[type="file"] { margin-bottom: 15px; font-size: 0.9rem; flex: none; width: 100%;}
+        
+        select, input[type="number"] {
+            padding: 6px 10px; border: 1px solid #ced4da; border-radius: 6px;
+            font-size: 0.95rem; color: #495057; outline: none; transition: border-color 0.2s;
+        }
+        select:focus, input[type="number"]:focus { border-color: #4dabf7; }
+        label { cursor: pointer; font-size: 0.95rem; }
+        input[type="radio"] { margin-right: 6px; transform: scale(1.1); }
+
+        .step-box { 
+            border: 1px solid #e9ecef; padding: 15px; margin-bottom: 15px; 
+            border-radius: 10px; background: #f8f9fa; flex: none;
+            transition: all 0.3s ease;
+        }
+        
+        .step-box-flexible {
+            display: flex; flex-direction: column; flex: 1 1 auto;
+            min-height: 0; margin-bottom: 0;
+        }
+
+        .step-title { font-weight: 700; font-size: 1.05rem; margin-bottom: 12px; color: #343a40; display: block; flex: none; }
+        .sub-options { padding: 10px 15px; background: #e3fafc; border-radius: 8px; margin-top: 5px; border: 1px solid #c5f6fa; flex: none; display: flex; align-items: center;}
+        
+        .btn { 
+            padding: 10px 16px; background: #339af0; color: #fff; border: none; 
+            border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.95rem;
+            transition: all 0.2s; box-shadow: 0 2px 4px rgba(51, 154, 240, 0.2);
+        }
+        .btn:hover { background: #228be6; transform: translateY(-1px); box-shadow: 0 4px 6px rgba(51, 154, 240, 0.3); }
+        .btn:active { transform: translateY(0); }
+        .btn-danger { background: #ff6b6b; box-shadow: 0 2px 4px rgba(255, 107, 107, 0.2); }
+        .btn-danger:hover { background: #fa5252; box-shadow: 0 4px 6px rgba(255, 107, 107, 0.3); }
+        .btn-outline { background: #fff; border: 1px solid #339af0; color: #339af0; padding: 4px 10px; border-radius: 6px; font-size: 0.8rem; cursor: pointer; font-weight: bold; transition: all 0.2s; }
+        .btn-outline:hover { background: #e7f5ff; }
+        
+        /* ✨個別削除ボタンのデザイン */
+        .btn-delete {
+            background: #ffe3e3; color: #fa5252; border: none; border-radius: 4px;
+            width: 24px; height: 24px; font-size: 16px; font-weight: bold;
+            cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+            transition: all 0.2s; padding: 0; line-height: 1;
+        }
+        .btn-delete:hover { background: #fa5252; color: white; }
+
+        /* リスト部分 */
+        .list-container {
+            flex: 1 1 auto; overflow-y: auto; min-height: 0; 
+            margin-top: 5px; border-radius: 8px; border: 1px solid #e9ecef;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.05); background: #fff;
+        }
+        #measurement-list { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
+        #measurement-list th, #measurement-list td { border-bottom: 1px solid #e9ecef; padding: 8px 10px; text-align: left; vertical-align: middle;}
+        #measurement-list th { background-color: #f1f3f5; font-weight: 600; color: #495057; position: sticky; top: 0; z-index: 2; box-shadow: 0 1px 0 #ddd;}
+        #measurement-list tr:last-child td { border-bottom: none; }
+        .color-box { display: inline-block; width: 14px; height: 14px; border-radius: 3px; margin-right: 6px; vertical-align: middle; box-shadow: 0 1px 2px rgba(0,0,0,0.2);}
+
+        /* 折りたたみアニメーション */
+        .collapsible-content { transition: max-height 0.4s ease, opacity 0.3s ease; max-height: 800px; opacity: 1; overflow: hidden; }
+        .collapsible-content.collapsed { max-height: 0; opacity: 0; margin: 0; }
+        
+        .step-summary { display: none; background: #e3fafc; padding: 10px 15px; border-radius: 8px; border: 1px solid #c5f6fa; justify-content: space-between; align-items: center; }
+        .step-summary.active { display: flex; }
+
+        /* 超コンパクトモード（測定時） */
+        .compact-mode #header-area { display: none; }
+        .compact-mode #step1-box { padding: 0; margin-bottom: 10px; background: transparent; border: none; }
+        .compact-mode .step-title { display: none; }
+        .compact-mode #step2-header { display: none; }
+        .compact-mode #step2-box { padding: 0; background: transparent; border: none; }
+        
+    </style>
+</head>
+<body>
+
+    <div id="left-area">
+        <div id="zoom-controls">
+            <button class="zoom-btn" id="btn-zoom-out" title="縮小">－</button>
+            <span id="zoom-display">100%</span>
+            <button class="zoom-btn" id="btn-zoom-in" title="拡大">＋</button>
+            <button class="zoom-btn" id="btn-zoom-reset">リセット</button>
+        </div>
+        <div id="canvas-wrapper">
+            <div id="canvas-container">
+                <canvas id="myCanvas"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <div id="side-panel">
+        <div id="side-panel-content">
+            
+            <div id="header-area">
+                <h2>🗺️ 地図距離測定ツール</h2>
+                <input type="file" id="upload" accept="image/*">
+            </div>
+
+            <!-- 1. 基準設定エリア -->
+            <div class="step-box" id="step1-box">
+                <span class="step-title">1. 地図の縮尺と基準設定</span>
+                
+                <div id="step1-content" class="collapsible-content">
+                    <div style="margin-bottom: 15px;">
+                        <div style="font-size: 0.9rem; margin-bottom: 4px; color: #495057;">地図の縮尺:</div>
+                        <select id="map-scale" style="width: 100%; margin-bottom: 10px;">
+                            <option value="custom">手動で入力する</option>
+                            <option value="4000" data-dist="120" selected>1:4,000 (磁北線間隔 120m)</option>
+                            <option value="10000" data-dist="300">1:10,000 (磁北線間隔 300m)</option>
+                            <option value="15000" data-dist="300">1:15,000 (磁北線間隔 300m)</option>
+                        </select>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 0.9rem;">実際の距離:</span>
+                            <input type="number" id="actual-length" value="120" style="width: 80px;" min="0.1" step="0.1">
+                            <select id="unit-select">
+                                <option value="mm">mm</option>
+                                <option value="cm">cm</option>
+                                <option value="m" selected>m</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div style="margin-bottom: 15px;">
+                        <button id="btn-auto-detect" class="btn" style="width: 100%;">✨ 垂直な磁北線を自動検出</button>
+                    </div>
+                    <label style="display:flex; align-items:center;">
+                        <input type="radio" name="mode" value="calib" checked> 
+                        <span style="font-weight: 600;">手動で基準の線を引く</span>
+                    </label>
+                    <span id="calib-status" style="font-size: 0.85rem; color: #fa5252; font-weight: bold; display: block; margin-top: 8px;">（未設定）</span>
+                </div>
+
+                <div id="step1-summary" class="step-summary">
+                    <div style="font-size: 0.9rem; color: #0b7285; display: flex; align-items: center;">
+                        <strong style="margin-right: 8px;">✔️ 基準設定済</strong> 
+                        <span id="summary-text" style="font-size: 0.85rem;">120m = 300px</span>
+                    </div>
+                    <button id="btn-edit-calib" class="btn-outline">再設定</button>
+                </div>
+            </div>
+
+            <!-- 2. 測定エリア -->
+            <div class="step-box step-box-flexible" id="step2-box">
+                <div id="step2-header">
+                    <span class="step-title">2. 測定と比較</span>
+                    <label style="display:flex; align-items:center; margin-bottom: 10px;">
+                        <input type="radio" name="mode" id="mode-measure" value="measure"> 
+                        <span style="font-weight: 600;">長さを測る</span>
+                    </label>
+                </div>
+                
+                <div class="sub-options">
+                    <span style="font-weight:bold; color:#0c8599; margin-right: 15px; font-size: 0.9rem;">描き方</span>
+                    <label style="margin-right: 15px;"><input type="radio" name="draw-type" value="straight" checked> 直線</label>
+                    <label><input type="radio" name="draw-type" value="freehand"> フリーハンド(道なり)</label>
+                </div>
+
+                <div style="margin-top: 15px; display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 6px; flex: none;">
+                    <strong style="color: #343a40;">測定リスト</strong>
+                    <button id="btn-clear-lines" class="btn btn-danger" style="padding: 4px 10px; font-size: 0.75rem; border-radius: 4px;">すべて消去</button>
+                </div>
+                
+                <!-- リストが入る枠 -->
+                <div class="list-container" id="list-container-div">
+                    <table id="measurement-list">
+                        <thead>
+                            <tr>
+                                <th style="width: 35%;">線</th>
+                                <th style="width: 25%;">種類</th>
+                                <th style="width: 30%;">長さ</th>
+                                <th style="width: 10%; text-align: center;"></th> <!-- 削除ボタン用カラム -->
+                            </tr>
+                        </thead>
+                        <tbody id="measurement-body">
+                            <tr><td colspan="4" style="text-align:center; color:#adb5bd; padding: 20px;">まだ線が引かれていません</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('myCanvas');
+        const ctx = canvas.getContext('2d');
+        const upload = document.getElementById('upload');
+        const calibStatus = document.getElementById('calib-status');
+        const mapScaleSelect = document.getElementById('map-scale');
+        const actualLengthInput = document.getElementById('actual-length');
+        const unitSelect = document.getElementById('unit-select');
+        const tableBody = document.getElementById('measurement-body');
+        const zoomDisplay = document.getElementById('zoom-display');
+        const listContainer = document.getElementById('list-container-div');
+        const sidePanelContent = document.getElementById('side-panel-content');
+
+        let img = new Image();
+        let currentPoints = [];
+        let isDrawing = false;
+        let zoomLevel = 1.0; 
+
+        let pixelsPerUnit = null; 
+        let currentUnit = 'px';
+
+        let measuredLines = [];
+        const lineColors = ['#fa5252', '#339af0', '#40c057', '#fd7e14', '#be4bdb', '#15aabf', '#e64980'];
+
+        // --- ズーム ---
+        function applyZoom() {
+            if (!img.src) return;
+            canvas.style.width = (img.width * zoomLevel) + 'px';
+            canvas.style.height = (img.height * zoomLevel) + 'px';
+            zoomDisplay.innerText = Math.round(zoomLevel * 100) + '%';
+        }
+        document.getElementById('btn-zoom-in').addEventListener('click', () => { zoomLevel += 0.2; applyZoom(); });
+        document.getElementById('btn-zoom-out').addEventListener('click', () => { if (zoomLevel > 0.2) { zoomLevel -= 0.2; applyZoom(); } });
+        document.getElementById('btn-zoom-reset').addEventListener('click', () => { zoomLevel = 1.0; applyZoom(); });
+
+        // --- コンパクトモード ---
+        function collapseStep1(successText) {
+            document.getElementById('step1-content').classList.add('collapsed');
+            document.getElementById('summary-text').innerText = successText;
+            document.getElementById('step1-summary').classList.add('active');
+            sidePanelContent.classList.add('compact-mode');
+        }
+
+        function expandStep1() {
+            sidePanelContent.classList.remove('compact-mode');
+            document.getElementById('step1-content').classList.remove('collapsed');
+            document.getElementById('step1-summary').classList.remove('active');
+            document.querySelector('input[value="calib"]').checked = true;
+        }
+        document.getElementById('btn-edit-calib').addEventListener('click', expandStep1);
+
+        // --- 設定値の変更 ---
+        mapScaleSelect.addEventListener('change', (e) => {
+            const selected = e.target.options[e.target.selectedIndex];
+            if (selected.value !== "custom") {
+                actualLengthInput.value = selected.getAttribute('data-dist');
+                unitSelect.value = "m";
+            }
+        });
+
+        upload.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                img.src = event.target.result;
+                img.onload = () => {
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    ctx.drawImage(img, 0, 0);
+                    zoomLevel = 1.0;
+                    applyZoom();
+                    resetCalibration();
+                }
+            }
+            reader.readAsDataURL(file);
+        });
+
+        function resetCalibration() {
+            pixelsPerUnit = null;
+            currentUnit = 'px';
+            calibStatus.innerText = '（未設定）';
+            calibStatus.style.color = '#fa5252';
+            measuredLines = [];
+            updateTable();
+            expandStep1(); 
+        }
+
+        document.getElementById('btn-clear-lines').addEventListener('click', () => {
+            measuredLines = [];
+            updateTable();
+            redrawCanvas();
+        });
+
+        // ✨ 個別削除の処理
+        tableBody.addEventListener('click', (e) => {
+            if (e.target.classList.contains('btn-delete')) {
+                const idx = parseInt(e.target.getAttribute('data-index'), 10);
+                measuredLines.splice(idx, 1); // 該当の線を配列から削除
+                updateTable(); // 表を再生成（番号も自動的に振り直される）
+                redrawCanvas(); // 地図上からも消去
+            }
+        });
+
+        function getMousePos(e) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            return {
+                x: (e.clientX - rect.left) * scaleX,
+                y: (e.clientY - rect.top) * scaleY
+            };
+        }
+
+        // --- 自動検出 ---
+        document.getElementById('btn-auto-detect').addEventListener('click', () => {
+            if (!img.src) { alert("先に画像を読み込んでください。"); return; }
+            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imgData.data;
+            const width = canvas.width;
+            const height = canvas.height;
+            let colCounts = new Array(width).fill(0);
+            const yStep = 5;
+            for (let y = 0; y < height; y += yStep) {
+                for (let x = 0; x < width; x++) {
+                    let idx = (y * width + x) * 4;
+                    let r = data[idx]; let g = data[idx+1]; let b = data[idx+2];
+                    let brightness = (r + g + b) / 3;
+                    let isBlack = brightness < 100;
+                    let isCyan = (b > 100 && b > r + 20 && g > r + 10);
+                    if (isBlack || isCyan) colCounts[x]++;
+                }
+            }
+            let candidateLines = [];
+            let lastX = -100;
+            const threshold = (height / yStep) * 0.4;
+            for (let x = 0; x < width; x++) {
+                if (colCounts[x] > threshold && x - lastX > 10) { candidateLines.push(x); lastX = x; }
+            }
+            let distances = {};
+            for (let i = 0; i < candidateLines.length - 1; i++) {
+                for (let j = i + 1; j < candidateLines.length; j++) {
+                    let d = candidateLines[j] - candidateLines[i];
+                    if (d > 50 && d < width / 1.5) distances[d] = (distances[d] || 0) + 1;
+                }
+            }
+            let bestDist = 0; let maxCount = 0;
+            for (let d in distances) {
+                d = parseInt(d);
+                let count = (distances[d-2]||0) + (distances[d-1]||0) + distances[d] + (distances[d+1]||0) + (distances[d+2]||0);
+                if (count > maxCount) { maxCount = count; bestDist = d; }
+            }
+            if (bestDist > 0) { 
+                const actualLength = parseFloat(actualLengthInput.value);
+                currentUnit = unitSelect.value;
+                pixelsPerUnit = bestDist / actualLength;
+                
+                const successText = `${actualLength}${currentUnit} = ${bestDist}px`;
+                document.getElementById('mode-measure').checked = true;
+                updateTable(); 
+                collapseStep1(successText);
+            } else {
+                alert("垂直な磁北線が検出できませんでした。\n「手動で基準の線を引く」モードで設定してください。");
+            }
+        });
+
+        // --- 描画 ---
+        function redrawCanvas() {
+            if (!img.src) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0);
+
+            measuredLines.forEach((line, index) => {
+                drawPath(line.points, line.color);
+                const lastPoint = line.points[line.points.length - 1];
+                if (lastPoint) {
+                    ctx.fillStyle = line.color;
+                    ctx.font = "bold 20px sans-serif";
+                    ctx.lineWidth = 4;
+                    ctx.strokeStyle = "rgba(255,255,255,0.8)";
+                    ctx.strokeText(`線${index + 1}`, lastPoint.x + 8, lastPoint.y + 8);
+                    ctx.fillText(`線${index + 1}`, lastPoint.x + 8, lastPoint.y + 8);
+                }
+            });
+        }
+
+        function drawPath(pointsArr, color) {
+            if (pointsArr.length < 2) return;
+            ctx.beginPath();
+            ctx.moveTo(pointsArr[0].x, pointsArr[0].y);
+            for (let i = 1; i < pointsArr.length; i++) { ctx.lineTo(pointsArr[i].x, pointsArr[i].y); }
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 5;
+            ctx.lineJoin = "round";
+            ctx.lineCap = "round";
+            ctx.shadowColor = "rgba(0,0,0,0.3)";
+            ctx.shadowBlur = 4;
+            ctx.stroke();
+            ctx.shadowColor = "transparent";
+            ctx.shadowBlur = 0;
+        }
+
+        function updateTable() {
+            tableBody.innerHTML = '';
+            if (measuredLines.length === 0) {
+                tableBody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#adb5bd; padding: 20px;">まだ線が引かれていません</td></tr>';
+                return;
+            }
+            measuredLines.forEach((line, index) => {
+                const tr = document.createElement('tr');
+                let displayLength = pixelsPerUnit ? (line.distancePx / pixelsPerUnit).toFixed(2) + ' ' + currentUnit : line.distancePx.toFixed(2) + ' px';
+                tr.innerHTML = `
+                    <td>
+                        <div class="color-box" style="background-color: ${line.color};"></div>
+                        <strong style="color:#343a40;">線${index + 1}</strong>
+                    </td>
+                    <td style="color:#495057;">${line.drawType === 'straight' ? '直線' : '道なり'}</td>
+                    <td style="font-weight:700; color:#1864ab;">${displayLength}</td>
+                    <td style="text-align:center;">
+                        <button class="btn-delete" data-index="${index}" title="この線を削除">×</button>
+                    </td>
+                `;
+                tableBody.appendChild(tr);
+            });
+        }
+
+        // --- マウス操作 ---
+        canvas.addEventListener('mousedown', (e) => {
+            if (!img.src) return;
+            const pos = getMousePos(e);
+            currentPoints = [{x: pos.x, y: pos.y}];
+            isDrawing = true;
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (!isDrawing) return;
+            const mode = document.querySelector('input[name="mode"]:checked').value;
+            const drawType = document.querySelector('input[name="draw-type"]:checked').value;
+            const pos = getMousePos(e);
+            redrawCanvas();
+
+            let previewColor = mode === 'calib' ? '#339af0' : lineColors[measuredLines.length % lineColors.length];
+            if (mode === 'calib' || drawType === 'straight') {
+                drawPath([currentPoints[0], pos], previewColor);
+            } else {
+                const lastPoint = currentPoints[currentPoints.length - 1];
+                if (Math.sqrt(Math.pow(pos.x - lastPoint.x, 2) + Math.pow(pos.y - lastPoint.y, 2)) > 3) { 
+                    currentPoints.push({x: pos.x, y: pos.y});
+                }
+                drawPath(currentPoints, previewColor);
+            }
+        });
+
+        canvas.addEventListener('mouseup', (e) => {
+            if (!isDrawing) return;
+            isDrawing = false;
+
+            const mode = document.querySelector('input[name="mode"]:checked').value;
+            const drawType = document.querySelector('input[name="draw-type"]:checked').value;
+            const pos = getMousePos(e);
+
+            if (mode === 'calib' || drawType === 'straight') { currentPoints = [currentPoints[0], {x: pos.x, y: pos.y}]; }
+
+            let distancePx = 0;
+            for (let i = 1; i < currentPoints.length; i++) {
+                distancePx += Math.sqrt(Math.pow(currentPoints[i].x - currentPoints[i-1].x, 2) + Math.pow(currentPoints[i].y - currentPoints[i-1].y, 2));
+            }
+
+            if (distancePx < 5) { redrawCanvas(); return; }
+
+            if (mode === 'calib') {
+                const actualLength = parseFloat(actualLengthInput.value);
+                currentUnit = unitSelect.value;
+                if (actualLength > 0) {
+                    pixelsPerUnit = distancePx / actualLength;
+                    
+                    const successText = `${actualLength}${currentUnit} = ${distancePx.toFixed(1)}px`;
+                    document.getElementById('mode-measure').checked = true;
+                    updateTable(); 
+                    collapseStep1(successText);
+                }
+            } else {
+                measuredLines.push({
+                    points: currentPoints, drawType: drawType, distancePx: distancePx,
+                    color: lineColors[measuredLines.length % lineColors.length]
+                });
+                updateTable();
+                
+                // リストの一番下へスクロール
+                listContainer.scrollTop = listContainer.scrollHeight;
+            }
+            redrawCanvas();
+        });
+        
+        canvas.addEventListener('mouseleave', () => { if (isDrawing) { isDrawing = false; redrawCanvas(); } });
+    </script>
+</body>
+</html>
